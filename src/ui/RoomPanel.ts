@@ -4,12 +4,17 @@ import { button, el } from './dom'
 /** 房间面板：6 格位置 + 等待状态 + AI 补位 / 取消 */
 export class RoomPanel {
   readonly root: HTMLDivElement
+  private title: HTMLElement
   private slots: HTMLDivElement
   private status: HTMLDivElement
+  private matchInfo: HTMLDivElement
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'panel hidden')
-    this.root.appendChild(el('h1', 'title', '房间'))
+    this.title = el('h1', 'title', '房间')
+    this.root.appendChild(this.title)
+    this.matchInfo = el('div', 'hint', '')
+    this.root.appendChild(this.matchInfo)
     this.slots = el('div', 'slots')
     this.root.appendChild(this.slots)
     this.status = el('div', 'status', '')
@@ -36,6 +41,10 @@ export class RoomPanel {
   }
 
   render(snapshot: RoomSnapshot, readyCountdown: number): void {
+    this.title.textContent = `${snapshot.roomName} · ${snapshot.size} 人`
+    this.matchInfo.textContent = snapshot.joinedExisting
+      ? '已自动加入有空位的房间'
+      : '暂无空位房间，已为你新开一间，等待其他玩家加入'
     this.slots.innerHTML = ''
     for (let i = 0; i < snapshot.size; i++) {
       const p = snapshot.players[i]

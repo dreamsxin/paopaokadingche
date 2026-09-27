@@ -5,19 +5,21 @@ export interface MenuChoice {
   roomSize: number
 }
 
+export type StatsProvider = (size: number) => { openRooms: number; openSeats: number }
+
+const SIZES = [2, 4, 6]
+
 export class MainMenu {
   readonly root: HTMLDivElement
   private onPick: (c: MenuChoice) => void = () => {}
+  private stats: StatsProvider | null = null
+  private sizeButtons: Array<{ size: number; btn: HTMLButtonElement }> = []
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'panel hidden')
     this.root.appendChild(el('h1', 'title', '跑跑卡丁车'))
     this.root.appendChild(
-      el(
-        'p',
-        'subtitle',
-        '漂移集气 · 拉车头出小喷 · 连喷维持高速。3 圈竞速，6 车同场。',
-      ),
+      el('p', 'subtitle', '漂移集气 · 拉车头出小喷 · 连喷维持高速。3 圈竞速，6 车同场。'),
     )
 
     const single = el('div', 'row')
@@ -26,35 +28,45 @@ export class MainMenu {
     )
     this.root.appendChild(single)
 
-    this.root.appendChild(el('div', 'status', '多人游戏（房间人数）'))
+    this.root.appendChild(el('div', 'status', '多人快速匹配（自动进有空位的房间）'))
     const multi = el('div', 'row')
-    for (const size of [2, 4, 6]) {
-      const wait = size - 1
-      multi.appendChild(
-        button(`${size} 人房（等 ${wait} 人）`, 'btn secondary', () =>
-          this.onPick({ mode: 'multi', roomSize: size }),
-        ),
+    for (const size of SIZES) {
+      const btn = button(`${size} 人房`, 'btn secondary', () =>
+        this.onPick({ mode: 'multi', roomSize: size }),
       )
+      this.sizeButtons.push({ size, btn })
+      multi.appendChild(btn)
     }
     this.root.appendChild(multi)
 
-    this.root.appendChild(
-      el(
-        'p',
-        'hint',
-        '键盘：↑/W 加速 · ↓/S 刹车 · ←→/AD 转向 · Shift 漂移 · Ctrl/空格 氮气\n' +
-          '手机：左摇杆转向（自动油门）+ 右侧 漂移 / 刹车 / 氮气\n' +
-          '技巧：入弯按住方向+Shift 开始集气，出弯按反方向键拉车头即出小喷；小喷结束前再次入漂可累积连喷。',
-      ),
+    const hint = el(
+      'p',
+      'hint',
+      '键盘：↑/W 加速 · ↓/S 刹车 · ←→/AD 转向 · Shift 漂移 · Ctrl/空格 氮气\n' +
+        '手机：左摇杆转向（自动油门）+ 右侧 漂移 / 刹车 / 氮气\n' +
+        '技巧：入弯按住方向+Shift 开始集气，出弯按反方向键拉车头即出小喷；小喷结束前再次入漂可累积连喷。',
     )
-    ;(this.root.lastChild as HTMLElement).style.whiteSpace = 'pre-line'
+    hint.style.whiteSpace = 'pre-line'
+    this.root.appendChild(hint)
 
     parent.appendChild(this.root)
   }
 
-  show(onPick: (c: MenuChoice) => void): void {
+  show(onPick: (c: MenuChoice) => void, stats?: StatsProvider): void {
     this.onPick = onPick
+    if (stats) this.stats = stats
+    this.refresh()
     this.root.classList.remove('hidden')
+  }
+
+  /** 刷新各人数档位的可加入房间数（大厅一直在变） */
+  refresh(): void {
+    if (!this.stats) return
+    for (const { size, btn } of this.sizeButtons) {
+      const { openRooms, openSeats } = this.stats(size)
+      btn.textContent =
+        openRooms > 0 ? `${size} 人房 · ${openRooms} 房 ${openSeats} 空位` : `${size} 人房 · 新开房间`
+    }
   }
 
   hide(): void {

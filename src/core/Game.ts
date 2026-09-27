@@ -11,6 +11,7 @@ import { MainMenu, type MenuChoice } from '../ui/MainMenu'
 import { RoomPanel } from '../ui/RoomPanel'
 import { ResultPanel, type ResultRow } from '../ui/ResultPanel'
 import { RoomController } from '../lobby/RoomController'
+import { lobbyStats, tickLocalLobby } from '../net/NetAdapter'
 import { NEUTRAL_INPUT, type MatchConfig } from '../types'
 
 const COLORS = [0x2f6bff, 0xff5a3d, 0x37d67a, 0xffc93c, 0xb06bff, 0x00c9c9]
@@ -36,6 +37,7 @@ export class Game {
   private countdown = 0
   private resultTimer = 0
   private lobbyRenderAcc = 0
+  private menuRefreshAcc = 0
   private cameraSnap = true
 
   constructor(viewport: HTMLElement, uiRoot: HTMLElement) {
@@ -67,7 +69,7 @@ export class Game {
     this.result.hide()
     this.roomPanel.hide()
     this.input.touch.show(false)
-    this.menu.show((choice) => this.onMenuPick(choice))
+    this.menu.show((choice) => this.onMenuPick(choice), (size) => lobbyStats(size))
   }
 
   private onMenuPick(choice: MenuChoice): void {
@@ -163,16 +165,28 @@ export class Game {
     for (const v of this.views.values()) v.dispose(this.view.scene)
     this.views.clear()
     this.director = new RaceDirector(this.track, inits, this.config.laps)
-    for (const r of this.director.racers) {
-      this.views.set(r.id, new KartView(r.color, this.view.scene))
-    }
+    this.director.racers.forEach((r, i) => {
+      this.views.set(r.id, new KartView(r.color, this.view.scene, i + 1))
+    })
     this.resultTimer = 0
   }
 
   // ---------------- 主循环 ----------------
 
   private fixedUpdate(dt: number): void {
+    // 大厅模拟（别人的房间人数变化）与游戏状态无关，始终推进
+    tickLocalLobby(dt)
+
     switch (this.sm.state) {
+      case 'menu': {
+        // 主菜单上的"可加入房间数"要跟着大厅变
+        this.menuRefreshAcc += dt
+        if (this.menuRefreshAcc >= 0.5) {
+          this.menuRefreshAcc = 0
+          this.menu.refresh()
+        }
+        break
+      }
       case 'lobby': {
         const room = this.room
         if (!room) break
@@ -191,6 +205,9 @@ export class Game {
             skill: p.skill,
           }))
           this.buildRace(inits)
+          // 房间已开赛，从大厅移除
+          room.close()
+          this.room = null
           this.enterCountdown()
         }
         break
@@ -249,6 +266,12 @@ export class Game {
             combo: me.kart.drift.comboCount,
             drifting: me.kart.drift.state === 'drifting',
             boosting: me.kart.drift.boosting,
+            boostKind:
+              me.kart.drift.nitroTimer > 0
+                ? 'nitro'
+                : me.kart.drift.boostTimer > 0
+                  ? 'small'
+                  : 'none',
             wrongWay: this.sm.state === 'racing' && director.isWrongWay(me),
             karts: director.racers.map((r) => ({
               x: r.kart.x,
@@ -261,6 +284,6 @@ export class Game {
         )
       }
     }
-    this.view.render()
+    this.view.render(dt)
   }
 }

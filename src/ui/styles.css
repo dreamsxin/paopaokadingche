@@ -68,6 +68,17 @@ body {
   background-clip: text;
   color: transparent;
   text-shadow: 0 6px 24px rgba(255, 138, 61, 0.25);
+  animation: titleFloat 3.2s ease-in-out infinite;
+}
+
+@keyframes titleFloat {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.02);
+  }
 }
 
 .subtitle {
@@ -294,8 +305,93 @@ body {
   background: linear-gradient(90deg, #ffe066, #ff7a29);
 }
 
-.bar.nitro > i {
+.bar.charge.max {
+  box-shadow: 0 0 12px rgba(255, 190, 60, 0.9);
+}
+
+.bar.charge.max > i {
+  background: linear-gradient(90deg, #fffbe0, #ffb347);
+}
+
+.nitro-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.nitro-cell {
+  flex: 1;
+  height: 14px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+
+.nitro-cell > i {
+  display: block;
+  height: 100%;
+  width: 0%;
   background: linear-gradient(90deg, #b06bff, #ff4ecd);
+}
+
+.nitro-cell.ready {
+  border-color: #ff9bf0;
+  box-shadow: 0 0 10px rgba(255, 110, 220, 0.75);
+}
+
+.combo-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #10152a;
+  background: linear-gradient(180deg, #fff0a8, #ffab3d);
+  opacity: 0;
+  transform: scale(0.8);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+
+.combo-badge.show {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* 喷射时的屏幕特效：暗角 + 速度线 */
+.boost-fx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+  background:
+    radial-gradient(ellipse at center, rgba(255, 255, 255, 0) 38%, rgba(90, 200, 255, 0.35) 100%),
+    repeating-conic-gradient(
+      from 0deg at 50% 50%,
+      rgba(255, 255, 255, 0.16) 0deg 1deg,
+      rgba(255, 255, 255, 0) 1deg 7deg
+    );
+  mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 32%, #000 78%);
+  -webkit-mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 32%, #000 78%);
+}
+
+.boost-fx.small {
+  opacity: 0.55;
+}
+
+.boost-fx.nitro {
+  opacity: 1;
+  background:
+    radial-gradient(ellipse at center, rgba(255, 255, 255, 0) 34%, rgba(255, 90, 220, 0.4) 100%),
+    repeating-conic-gradient(
+      from 0deg at 50% 50%,
+      rgba(255, 255, 255, 0.24) 0deg 1deg,
+      rgba(255, 255, 255, 0) 1deg 6deg
+    );
 }
 
 .hud-center {
@@ -326,6 +422,36 @@ body {
   color: #ffd971;
   text-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
   pointer-events: none;
+}
+
+.countdown.pop {
+  animation: cdPop 0.45s ease-out;
+}
+
+@keyframes cdPop {
+  from {
+    transform: scale(2);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.result-row.rank-1 .pos {
+  color: #ffd75e;
+}
+
+.result-row.rank-2 .pos {
+  color: #d8e2f2;
+}
+
+.result-row.rank-3 .pos {
+  color: #e2a15c;
 }
 
 /* ---------- 触控 ---------- */

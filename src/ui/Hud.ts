@@ -18,6 +18,7 @@ export interface HudModel {
   combo: number
   drifting: boolean
   boosting: boolean
+  boostKind: 'none' | 'small' | 'nitro'
   wrongWay: boolean
   karts: Array<{ x: number; z: number; color: number; isPlayer: boolean }>
 }
@@ -32,7 +33,10 @@ export class Hud {
   private lapTimeText: HTMLElement
   private speedText: HTMLElement
   private chargeBar: HTMLElement
-  private nitroBar: HTMLElement
+  private chargeWrap: HTMLElement
+  private nitroCells: HTMLElement[] = []
+  private comboBadge: HTMLElement
+  private boostFx: HTMLElement
   private center: HTMLElement
   private countdown: HTMLElement
   private canvas: HTMLCanvasElement
@@ -41,6 +45,7 @@ export class Hud {
   private mapScale = 1
   private mapOffset: [number, number] = [0, 0]
   private flashTimer = 0
+  private lastCountdown: string | null = null
 
   constructor(parent: HTMLElement, track: TrackSpline) {
     this.root = el('div', 'hud hidden')
@@ -58,14 +63,20 @@ export class Hud {
     const gauge = el('div', 'hud-gauge')
     this.speedText = el('div', 'hud-speed')
     this.speedText.innerHTML = '0<small>km/h</small>'
-    const chargeWrap = el('div', 'bar charge')
+    this.chargeWrap = el('div', 'bar charge')
     this.chargeBar = el('i')
-    chargeWrap.appendChild(this.chargeBar)
-    const nitroWrap = el('div', 'bar nitro')
-    this.nitroBar = el('i')
-    nitroWrap.appendChild(this.nitroBar)
-    gauge.append(this.speedText, chargeWrap, nitroWrap)
+    this.chargeWrap.appendChild(this.chargeBar)
+    const nitroRow = el('div', 'nitro-row')
+    for (let i = 0; i < 2; i++) {
+      const cell = el('div', 'nitro-cell')
+      cell.appendChild(el('i'))
+      this.nitroCells.push(cell)
+      nitroRow.appendChild(cell)
+    }
+    this.comboBadge = el('div', 'combo-badge', '')
+    gauge.append(this.comboBadge, this.speedText, this.chargeWrap, nitroRow)
 
+    this.boostFx = el('div', 'boost-fx')
     this.center = el('div', 'hud-center')
     this.countdown = el('div', 'countdown hidden')
 
@@ -76,7 +87,7 @@ export class Hud {
     this.canvas.style.height = `${MAP_SIZE}px`
     this.ctx = this.canvas.getContext('2d')!
 
-    this.root.append(lapBox, timeBox, gauge, this.canvas, this.center, this.countdown)
+    this.root.append(lapBox, timeBox, gauge, this.canvas, this.boostFx, this.center, this.countdown)
     parent.appendChild(this.root)
     this.prepareMap(track)
   }
@@ -114,12 +125,21 @@ export class Hud {
 
   hide(): void {
     this.root.classList.add('hidden')
+    this.boostFx.classList.remove('small', 'nitro')
     this.setCountdown(null)
   }
 
   setCountdown(text: string | null): void {
+    if (text === this.lastCountdown) return
+    this.lastCountdown = text
     this.countdown.textContent = text ?? ''
     this.countdown.classList.toggle('hidden', text === null)
+    // 重新触发缩放动画
+    this.countdown.classList.remove('pop')
+    if (text !== null) {
+      void this.countdown.offsetWidth
+      this.countdown.classList.add('pop')
+    }
   }
 
   flash(text: string, seconds = 1.2): void {
@@ -141,14 +161,26 @@ export class Hud {
       isFinite(m.bestLap) ? formatTime(m.bestLap) : '--'
     }`
     this.speedText.innerHTML = `${Math.round(m.kmh)}<small>km/h</small>`
-    this.chargeBar.style.width = `${clamp(m.charge, 0, 1) * 100}%`
-    this.nitroBar.style.width = `${clamp(m.gauge / 2, 0, 1) * 100}%`
+    const charge = clamp(m.charge, 0, 1)
+    this.chargeBar.style.width = `${charge * 100}%`
+    this.chargeWrap.classList.toggle('max', charge > 0.92)
 
-    if (m.wrongWay) {
-      this.flash('逆行！', 0.2)
-    } else if (m.combo >= 2 && m.boosting) {
-      this.flash(`连喷 x${m.combo}`, 0.5)
+    // 氮气槽按格显示（满 1 格即可释放）
+    for (let i = 0; i < this.nitroCells.length; i++) {
+      const fill = clamp(m.gauge - i, 0, 1)
+      const bar = this.nitroCells[i].firstElementChild as HTMLElement
+      bar.style.width = `${fill * 100}%`
+      this.nitroCells[i].classList.toggle('ready', fill >= 1)
     }
+
+    const comboOn = m.combo >= 2
+    this.comboBadge.textContent = comboOn ? `连喷 x${m.combo}` : ''
+    this.comboBadge.classList.toggle('show', comboOn)
+
+    this.boostFx.classList.toggle('small', m.boostKind === 'small')
+    this.boostFx.classList.toggle('nitro', m.boostKind === 'nitro')
+
+    if (m.wrongWay) this.flash('逆行！', 0.2)
 
     this.drawMap(m)
   }
@@ -157,12 +189,30 @@ export class Hud {
     const c = this.ctx
     const full = MAP_SIZE * 2
     c.clearRect(0, 0, full, full)
-    c.lineWidth = 7
-    c.strokeStyle = 'rgba(255,255,255,0.35)'
-    c.beginPath()
-    this.mapPath.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)))
-    c.closePath()
+    c.lineJoin = 'round'
+    c.lineCap = 'round'
+
+    const path = () => {
+      c.beginPath()
+      this.mapPath.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)))
+      c.closePath()
+    }
+    // 路面 + 边线
+    c.lineWidth = 10
+    c.strokeStyle = 'rgba(12,18,34,0.55)'
+    path()
     c.stroke()
+    c.lineWidth = 7
+    c.strokeStyle = 'rgba(214,226,255,0.55)'
+    path()
+    c.stroke()
+
+    // 起跑线
+    if (this.mapPath.length) {
+      const [sx, sy] = this.mapPath[0]
+      c.fillStyle = '#ffd971'
+      c.fillRect(sx - 5, sy - 5, 10, 10)
+    }
 
     for (const k of m.karts) {
       const [x, y] = this.toMap(k.x, k.z)
@@ -170,6 +220,9 @@ export class Hud {
       c.arc(x, y, k.isPlayer ? 7 : 5, 0, Math.PI * 2)
       c.fillStyle = k.isPlayer ? '#ffd971' : `#${k.color.toString(16).padStart(6, '0')}`
       c.fill()
+      c.lineWidth = 2
+      c.strokeStyle = 'rgba(10,14,28,0.7)'
+      c.stroke()
     }
   }
 }

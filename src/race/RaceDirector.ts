@@ -6,7 +6,9 @@ import { wrapPi } from '../core/math'
 
 /** 检查点数量，用于防止抄近道 / 倒车刷圈 */
 const CP_COUNT = 8
-/** 离开路面这么远就复位回赛道 */
+/** 路肩之外的缓冲宽度，超过即撞护栏（与 TrackBuilder 的护栏位置一致） */
+const WALL_MARGIN = 4
+/** 离开路面这么远就复位回赛道（撞墙已经兜住，这里只是保险） */
 const RESPAWN_LATERAL = 16
 const KART_RADIUS = 1.6
 
@@ -146,6 +148,8 @@ export class RaceDirector {
       r.lateral = pr.lateral
       k.offRoad = Math.abs(pr.lateral) > this.track.halfWidth
 
+      const wall = this.track.halfWidth + WALL_MARGIN
+      if (Math.abs(pr.lateral) > wall) this.hitWall(r, pr.t, wall, Math.sign(pr.lateral))
       if (Math.abs(pr.lateral) > RESPAWN_LATERAL) this.respawn(r)
       this.updateLap(r)
 
@@ -172,6 +176,24 @@ export class RaceDirector {
   private autopilot(r: Racer): BotDriver {
     r.bot = new BotDriver(r.kart, this.track, 0.5, 7)
     return r.bot
+  }
+
+  /** 撞护栏：贴回墙面 + 速度投影到赛道方向，掉速但不会被弹飞或卡住 */
+  private hitWall(r: Racer, t: number, wall: number, sign: number): void {
+    const k = r.kart
+    const s = this.track.sampleAt(t)
+    k.x = s.pos.x + s.right.x * sign * wall
+    k.z = s.pos.z + s.right.z * sign * wall
+    const along = Math.cos(k.velAngle) * s.tangent.x + Math.sin(k.velAngle) * s.tangent.z
+    k.speed = Math.max(0, k.speed * (0.5 + 0.35 * Math.abs(along)))
+    k.velAngle = along < 0 ? s.angle + Math.PI : s.angle
+    k.heading += wrapPi(s.angle - k.heading) * 0.4
+    // 撞墙打断漂移集气
+    if (k.drift.state === 'drifting') {
+      k.drift.state = 'none'
+      k.drift.charge = 0
+      k.drift.comboCount = 0
+    }
   }
 
   private respawn(r: Racer): void {

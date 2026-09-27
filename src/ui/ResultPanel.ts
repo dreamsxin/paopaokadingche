@@ -36,7 +36,7 @@ export class ResultPanel {
     this.title.textContent = me ? `第 ${me.rank} 名` : '结算'
     this.list.innerHTML = ''
     for (const r of rows) {
-      const row = el('div', `result-row${r.isPlayer ? ' me' : ''}`)
+      const row = el('div', `result-row rank-${r.rank}${r.isPlayer ? ' me' : ''}`)
       row.appendChild(el('span', 'pos', String(r.rank)))
       row.appendChild(el('span', 'name', r.name))
       row.appendChild(

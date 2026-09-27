@@ -100,6 +100,11 @@ export class BotDriver {
     // 直道上放氮气
     const nitro = k.drift.gauge >= 1 && sharp < 0.22 && this.skill > 0.2
 
+    // 冲出路肩时往赛道里收，避免长时间在草地上跑
+    if (Math.abs(pr.lateral) > hw * 0.85) {
+      steer = clamp(steer - Math.sign(pr.lateral) * 0.4, -1, 1)
+    }
+
     return { throttle: 1, steer, drift, nitro }
   }
 }
