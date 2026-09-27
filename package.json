@@ -1,0 +1,21 @@
+{
+  "name": "paopaokadingche",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "跑跑卡丁车 H5 手游 - 可玩垂直切片（漂移集气 / 小喷 / 连喷 / 氮气）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.170.0",
+    "typescript": "5.6.3",
+    "vite": "5.4.11"
+  }
+}
