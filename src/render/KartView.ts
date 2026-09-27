@@ -2,6 +2,9 @@ import * as THREE from 'three'
 import type { KartPhysics } from '../physics/KartPhysics'
 import { clamp, damp, makeRandom } from '../core/math'
 import { outline, softCircleTexture, toon } from './Materials'
+import type { KartStyle } from '../karts/catalog'
+
+const DEFAULT_STYLE: KartStyle = { body: [1, 1, 1], nose: 1, wing: 1, fin: 1, thrusters: 2 }
 
 const SPARK_COUNT = 40
 const SPARK_LIFE = 0.42
@@ -59,6 +62,7 @@ export class KartView {
   private steerPivots: THREE.Group[] = []
   private flames: THREE.Mesh[] = []
   private flameMat: THREE.MeshBasicMaterial
+  private flameScale = 1
   private neonMat: THREE.MeshBasicMaterial
   private neonBase: THREE.Color
   private glowMat: THREE.MeshBasicMaterial
@@ -78,8 +82,9 @@ export class KartView {
   private squash = 1
   private heat = 0
 
-  constructor(color: number, scene: THREE.Scene, seed = 7) {
+  constructor(color: number, scene: THREE.Scene, seed = 7, style: KartStyle = DEFAULT_STYLE) {
     this.rng = makeRandom(seed * 7919 + 13)
+    const [bx, by, bz] = style.body
     const paint = toon(color)
     // 深色车漆：座舱/裙边用，撑出层次
     const deepColor = new THREE.Color(color).multiplyScalar(0.55)
@@ -98,58 +103,73 @@ export class KartView {
     this.neonMat = new THREE.MeshBasicMaterial({ color: this.neonBase.clone() })
 
     const hull = new THREE.Mesh(GEO.hull, paint)
-    hull.position.y = 0.44
+    hull.scale.set(bx, by, bz)
+    hull.position.y = 0.44 * by
     const deck = new THREE.Mesh(GEO.deck, deep)
-    deck.position.set(-0.25, 0.72, 0)
-    // 楔形车头：压扁的四棱锥，尖端朝前
+    deck.scale.set(bx, by, bz)
+    deck.position.set(-0.25 * bx, 0.72 * by, 0)
+    // 楔形车头：压扁的四棱锥，尖端朝前；长度由车型决定
     const nose = new THREE.Mesh(GEO.nose, paint)
     nose.rotation.z = -Math.PI / 2
-    nose.scale.set(1, 1, 0.75)
-    nose.position.set(1.78, 0.46, 0)
+    nose.scale.set(1, style.nose, 0.75 * bz)
+    nose.position.set(1.78 * bx, 0.46 * by, 0)
     const canopy = new THREE.Mesh(GEO.canopy, glass)
     canopy.scale.set(1.15, 0.95, 0.85)
-    canopy.position.set(-0.15, 0.86, 0)
+    canopy.position.set(-0.15 * bx, 0.86 * by, 0)
     const head = new THREE.Mesh(GEO.head, toon(0xffe3c0))
-    head.position.set(-0.3, 0.98, 0)
+    head.position.set(-0.3 * bx, 0.98 * by, 0)
     const fin = new THREE.Mesh(GEO.fin, deep)
-    fin.position.set(-1.3, 1.05, 0)
+    fin.scale.set(1, style.fin, 1)
+    fin.position.set(-1.3 * bx, 0.78 * by + 0.27 * style.fin, 0)
     const finEdge = new THREE.Mesh(GEO.noseStrip, this.neonMat)
     finEdge.scale.set(7, 0.6, 0.8)
     finEdge.rotation.y = Math.PI / 2
-    finEdge.position.set(-1.3, 1.32, 0)
+    finEdge.position.set(-1.3 * bx, 0.78 * by + 0.55 * style.fin, 0)
     const wing = new THREE.Mesh(GEO.wing, dark)
-    wing.position.set(-2.0, 1.22, 0)
+    wing.scale.set(1, 1, style.wing)
+    wing.position.set(-2.0 * bx, 1.22 * by, 0)
     const wingGlow = new THREE.Mesh(GEO.lightBar, this.neonMat)
-    wingGlow.scale.set(0.5, 0.35, 1.4)
-    wingGlow.position.set(-2.18, 1.22, 0)
+    wingGlow.scale.set(0.5, 0.35, 1.4 * style.wing)
+    wingGlow.position.set(-2.18 * bx, 1.22 * by, 0)
     const lightBar = new THREE.Mesh(GEO.lightBar, this.neonMat)
-    lightBar.position.set(-2.1, 0.7, 0)
+    lightBar.scale.set(1, 1, bz)
+    lightBar.position.set(-2.1 * bx, 0.7 * by, 0)
     const noseStrip = new THREE.Mesh(GEO.noseStrip, this.neonMat)
-    noseStrip.position.set(1.55, 0.62, 0)
+    noseStrip.position.set(1.55 * bx, 0.62 * by, 0)
 
     this.body.add(hull, deck, nose, canopy, head, fin, finEdge, wing, wingGlow, lightBar, noseStrip)
 
-    // 侧裙霓虹 + 悬浮尾翼支柱 + 双推进器
+    // 侧裙霓虹 + 悬浮尾翼支柱
     for (const z of [-1, 1]) {
       const strip = new THREE.Mesh(GEO.sideStrip, this.neonMat)
-      strip.position.set(0.15, 0.52, z * 0.88)
+      strip.scale.set(bx, 1, 1)
+      strip.position.set(0.15 * bx, 0.52 * by, z * 0.88 * bz)
       const skirt = new THREE.Mesh(GEO.sideStrip, deep)
-      skirt.scale.set(1.05, 2.6, 1.6)
-      skirt.position.set(0.15, 0.32, z * 0.9)
+      skirt.scale.set(1.05 * bx, 2.6, 1.6)
+      skirt.position.set(0.15 * bx, 0.32 * by, z * 0.9 * bz)
       const strut = new THREE.Mesh(GEO.wingStrut, dark)
-      strut.position.set(-1.95, 0.92, z * 0.62)
+      strut.position.set(-1.95 * bx, 0.92 * by, z * 0.62 * style.wing)
+      this.body.add(strip, skirt, strut)
+    }
+
+    // 推进器：1 个居中大喷，或 2 个对称喷口
+    const thrusterZ = style.thrusters === 1 ? [0] : [-0.52 * bz, 0.52 * bz]
+    const thrusterScale = style.thrusters === 1 ? 1.35 : 1
+    for (const z of thrusterZ) {
       const thruster = new THREE.Mesh(GEO.thruster, metal)
       thruster.rotation.z = Math.PI / 2
-      thruster.position.set(-1.85, 0.6, z * 0.52)
+      thruster.scale.setScalar(thrusterScale)
+      thruster.position.set(-1.85 * bx, 0.6 * by, z)
       const ring = new THREE.Mesh(GEO.thrusterRing, this.neonMat)
       ring.rotation.y = Math.PI / 2
-      ring.position.set(-2.28, 0.6, z * 0.52)
-      this.body.add(strip, skirt, strut, thruster, ring)
+      ring.scale.setScalar(thrusterScale)
+      ring.position.set(-2.28 * bx, 0.6 * by, z)
+      this.body.add(thruster, ring)
     }
 
     // 卡通描边：只给车体主块，避免 draw call 翻倍
     const shell = new THREE.Mesh(GEO.hull, outline())
-    shell.scale.setScalar(1.09)
+    shell.scale.set(bx * 1.09, by * 1.09, bz * 1.09)
     shell.position.copy(hull.position)
     this.body.add(shell)
 
@@ -161,7 +181,7 @@ export class KartView {
     ] as const) {
       // steerPivot(转向) -> spinPivot(滚动) -> 轮胎/轮毂/霓虹轮圈
       const steerPivot = new THREE.Group()
-      steerPivot.position.set(wx, 0.45, wz)
+      steerPivot.position.set(wx * bx, 0.45, wz * bz)
       const spinPivot = new THREE.Group()
       const tireMesh = new THREE.Mesh(GEO.tire, tire)
       tireMesh.rotation.x = Math.PI / 2
@@ -179,16 +199,17 @@ export class KartView {
     this.group.add(this.body)
     scene.add(this.group)
 
-    // 双推进器尾焰
+    // 推进器尾焰（数量与喷口一致）
     this.flameMat = new THREE.MeshBasicMaterial({
       color: 0x66ccff,
       transparent: true,
       opacity: 0.85,
     })
-    for (const z of [-0.52, 0.52]) {
+    this.flameScale = thrusterScale
+    for (const z of thrusterZ) {
       const flame = new THREE.Mesh(GEO.flame, this.flameMat)
       flame.rotation.z = Math.PI / 2
-      flame.position.set(-3.0, 0.6, z)
+      flame.position.set(-3.0 * bx, 0.6 * by, z)
       flame.visible = false
       this.body.add(flame)
       this.flames.push(flame)
@@ -317,7 +338,8 @@ export class KartView {
       this.flameMat.color.setHex(d.nitroTimer > 0 ? 0xff6ad5 : 0x66ccff)
       for (const flame of this.flames) {
         flame.visible = true
-        flame.scale.set(boostQ * flicker * 0.85, 0.8 + boostQ * 0.8, boostQ * flicker * 0.85)
+        const w = boostQ * flicker * 0.85 * this.flameScale
+        flame.scale.set(w, (0.8 + boostQ * 0.8) * this.flameScale, w)
       }
     } else {
       for (const flame of this.flames) flame.visible = false

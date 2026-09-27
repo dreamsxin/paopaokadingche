@@ -75,11 +75,14 @@ export class KartPhysics {
     d.update(dt, input, { speed: this.speed, slip: this.slip, maxSpeed: st.maxSpeed })
 
     // ---- 纵向：油门 / 刹车 / 喷射 ----
+    // 多种加速取最强的一种，不叠加，否则氮气+小喷+起步会把速度推到荒谬的量级
     const boostMul =
       1 +
-      (d.nitroTimer > 0 ? 0.36 * st.nitroPower : 0) +
-      (d.boostTimer > 0 ? 0.14 + 0.13 * d.boostStrength : 0) +
-      (d.launchTimer > 0 ? 0.18 : 0)
+      Math.max(
+        d.nitroTimer > 0 ? 0.3 * st.nitroPower : 0,
+        d.boostTimer > 0 ? 0.12 + 0.11 * d.boostStrength : 0,
+        d.launchTimer > 0 ? 0.16 : 0,
+      )
     const offRoadMul = this.offRoad ? 0.6 : 1
     const targetMax = st.maxSpeed * boostMul * offRoadMul
 

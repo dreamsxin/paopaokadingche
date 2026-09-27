@@ -43,12 +43,15 @@ export class BotDriver {
     )
     const sharp = Math.abs(curve)
 
-    // 走内线，弯越急贴得越内
-    const lineOffset = Math.sign(curve) * Math.min(hw * 0.55, sharp * hw * 1.1)
+    // 走内线，弯越急贴得越内；漂移中改为瞄中线，避免侧滑把自己甩到护栏上
+    const lineScale = this.phase === 'cruise' ? 1 : 0.3
+    const lineOffset = Math.sign(curve) * Math.min(hw * 0.55, sharp * hw * 1.1) * lineScale
     const target = this.track.pointAt(pr.t + aimDist / len, lineOffset)
     const desired = Math.atan2(target.z - k.z, target.x - k.x)
     const noise = Math.sin(this.noisePhase * 2.3) * 0.07 * (1 - this.skill)
     const err = wrapPi(desired - k.heading) + noise
+    // 正在被甩向弯道外侧（护栏那一边）
+    const slidingWide = pr.lateral * Math.sign(curve) < -hw * 0.45
 
     let steer = clamp(err * 2.5, -1, 1)
     let drift = false
@@ -56,7 +59,12 @@ export class BotDriver {
     switch (this.phase) {
       case 'cruise': {
         const enterAngle = 0.62 - 0.22 * this.skill
-        if (this.cooldown <= 0 && sharp > enterAngle && k.speed > 16) {
+        if (
+          this.cooldown <= 0 &&
+          sharp > enterAngle &&
+          k.speed > 16 &&
+          Math.abs(pr.lateral) < hw * 0.65
+        ) {
           this.phase = 'drift'
           this.dir = Math.sign(curve) || 1
           this.timer = 0
@@ -70,13 +78,15 @@ export class BotDriver {
         drift = true
         steer = clamp(err * 2.5 + 0.3 * this.dir, -1, 1)
         const chargeTarget = 0.42 + 0.4 * this.skill
-        const cornerDone = sharp < 0.2 || Math.abs(err) < 0.05
-        if (
-          k.drift.charge > chargeTarget ||
-          cornerDone ||
-          this.timer > 1.9 ||
-          k.drift.state === 'none'
-        ) {
+        // 先漂够时间把气攒起来，再拉车头，否则只掉速不出喷
+        const minHold = 0.25 + 0.3 * this.skill
+        const cornerDone = sharp < 0.2
+        // 车头甩过目标方向：灵活性高的车要立刻拉回来
+        const overRotated = err * this.dir < -0.12
+        const ready =
+          this.timer > minHold && (k.drift.charge > chargeTarget || cornerDone || overRotated)
+        // 被甩向外侧时立刻中断漂移救车，不等攒气
+        if (slidingWide || ready || this.timer > 1.9 || k.drift.state === 'none') {
           this.phase = 'counter'
           this.timer = 0
         }
@@ -87,7 +97,7 @@ export class BotDriver {
         // 断位拉车头：反方向键 + 继续按住漂移键，等 DriftCharge 结算小喷
         drift = true
         steer = -this.dir
-        if (k.drift.state === 'none' || this.timer > 0.6) {
+        if (k.drift.state === 'none' || this.timer > 0.9) {
           this.phase = 'cruise'
           this.cooldown = 0.18
           drift = false
@@ -105,6 +115,12 @@ export class BotDriver {
       steer = clamp(steer - Math.sign(pr.lateral) * 0.4, -1, 1)
     }
 
-    return { throttle: 1, steer, drift, nitro }
+    // 弯前速度过高就收油，别一头撞进护栏
+    let throttle = 1
+    if (this.phase === 'cruise' && sharp > 0.5 && k.speed > k.stats.maxSpeed * (0.88 + 0.1 * this.skill)) {
+      throttle = 0
+    }
+
+    return { throttle, steer, drift, nitro }
   }
 }

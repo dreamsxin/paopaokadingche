@@ -1,7 +1,9 @@
 import { KartPhysics } from '../physics/KartPhysics'
 import { BotDriver } from '../ai/BotDriver'
 import type { TrackSpline } from '../track/TrackSpline'
-import { DEFAULT_DRIVER_STATS, DEFAULT_KART_STATS, NEUTRAL_INPUT, type KartInput } from '../types'
+import { DEFAULT_DRIVER_STATS, NEUTRAL_INPUT, type KartInput } from '../types'
+import { getModel } from '../karts/catalog'
+import { createStats, type RaceStatsData } from './RaceStats'
 import { wrapPi } from '../core/math'
 
 /** 检查点数量，用于防止抄近道 / 倒车刷圈 */
@@ -19,6 +21,8 @@ export interface RacerInit {
   color: number
   /** AI 水平 0..1，玩家忽略 */
   skill?: number
+  /** 车型 id，缺省用目录第一台 */
+  modelId?: string
 }
 
 export interface Racer {
@@ -26,6 +30,7 @@ export interface Racer {
   name: string
   isPlayer: boolean
   color: number
+  modelId: string
   kart: KartPhysics
   bot: BotDriver | null
   lap: number
@@ -43,6 +48,14 @@ export interface Racer {
   lateral: number
   /** 最近一帧的转向输入，仅用于前轮视觉 */
   lastSteer: number
+  /** 本场技术统计 */
+  stats: RaceStatsData
+  /** 本圈各分段用时（索引 = 分段号） */
+  sectors: number[]
+  /** 最佳圈的分段用时，用于实时对比 */
+  bestSectors: number[]
+  lastCp: number
+  lastWallTime: number
 }
 
 export class RaceDirector {
@@ -54,6 +67,10 @@ export class RaceDirector {
   finishedAll = false
   /** 玩家刚刚完成的圈（供 HUD 播报），消费后置空 */
   lapFlash: { lap: number; time: number } | null = null
+  /** 玩家刚过一个分段与自己最佳圈的差值（负=更快），消费后置空 */
+  sectorFlash: { sector: number; delta: number } | null = null
+  /** 玩家刚刚打出最佳化漂移小喷（供 HUD 播报 Perfect），消费后置 false */
+  perfectFlash = false
 
   constructor(
     readonly track: TrackSpline,
@@ -61,12 +78,14 @@ export class RaceDirector {
     readonly totalLaps = 3,
   ) {
     inits.forEach((init, i) => {
-      const kart = new KartPhysics({ ...DEFAULT_KART_STATS }, { ...DEFAULT_DRIVER_STATS })
+      const model = getModel(init.modelId)
+      const kart = new KartPhysics({ ...model.stats }, { ...DEFAULT_DRIVER_STATS })
       const racer: Racer = {
         id: init.id,
         name: init.name,
         isPlayer: init.isPlayer,
         color: init.color,
+        modelId: model.id,
         kart,
         bot: init.isPlayer
           ? null
@@ -85,6 +104,11 @@ export class RaceDirector {
         finishTime: 0,
         lateral: 0,
         lastSteer: 0,
+        stats: createStats(),
+        sectors: new Array(CP_COUNT).fill(0),
+        bestSectors: [],
+        lastCp: 0,
+        lastWallTime: -1,
       }
       this.racers.push(racer)
     })
@@ -120,10 +144,17 @@ export class RaceDirector {
       r.bestLap = Infinity
       r.finished = false
       r.finishTime = 0
+      r.stats = createStats()
+      r.sectors = new Array(CP_COUNT).fill(0)
+      r.bestSectors = []
+      r.lastCp = Math.min(CP_COUNT - 1, Math.floor(t * CP_COUNT))
+      r.lastWallTime = -1
     })
     this.time = 0
     this.frozen = true
     this.finishedAll = false
+    this.sectorFlash = null
+    this.lapFlash = null
   }
 
   /** 倒计时结束：解冻并给起步加速 */
@@ -167,6 +198,7 @@ export class RaceDirector {
       k.update(dt, input)
       r.lastSteer = input.steer
       r.progress = r.lap + r.t
+      if (!this.frozen) this.collectStats(r, dt)
     }
 
     this.resolveCollisions()
@@ -178,9 +210,45 @@ export class RaceDirector {
     return r.bot
   }
 
+  /** 消费漂移事件并累积技术统计 */
+  private collectStats(r: Racer, dt: number): void {
+    const k = r.kart
+    const s = r.stats
+    s.topSpeed = Math.max(s.topSpeed, k.kmh)
+    if (k.drift.state === 'drifting') s.driftTime += dt
+    if (k.offRoad) s.offRoadTime += dt
+    const events = k.drift.events
+    for (const ev of events) {
+      if (ev.type === 'boost') {
+        s.boosts += 1
+        s.maxCombo = Math.max(s.maxCombo, ev.combo)
+        if (ev.optimized) {
+          s.perfect += 1
+          if (r.isPlayer) this.perfectFlash = true
+        }
+      } else if (ev.type === 'nitro') {
+        s.nitros += 1
+      } else {
+        s.fails += 1
+      }
+    }
+    events.length = 0
+  }
+
+  /** 与第 1 名的进度差（米），正数表示落后 */
+  gapToLeader(r: Racer): number {
+    const leader = this.ranking[0]
+    if (!leader || leader === r) return 0
+    return (leader.progress - r.progress) * this.track.length
+  }
+
   /** 撞护栏：贴回墙面 + 速度投影到赛道方向，掉速但不会被弹飞或卡住 */
   private hitWall(r: Racer, t: number, wall: number, sign: number): void {
     const k = r.kart
+    if (!this.frozen && this.time - r.lastWallTime > 0.6) {
+      r.stats.wallHits += 1
+      r.lastWallTime = this.time
+    }
     const s = this.track.sampleAt(t)
     k.x = s.pos.x + s.right.x * sign * wall
     k.z = s.pos.z + s.right.z * sign * wall
@@ -189,11 +257,7 @@ export class RaceDirector {
     k.velAngle = along < 0 ? s.angle + Math.PI : s.angle
     k.heading += wrapPi(s.angle - k.heading) * 0.4
     // 撞墙打断漂移集气
-    if (k.drift.state === 'drifting') {
-      k.drift.state = 'none'
-      k.drift.charge = 0
-      k.drift.comboCount = 0
-    }
+    k.drift.abort()
   }
 
   private respawn(r: Racer): void {
@@ -208,6 +272,18 @@ export class RaceDirector {
   private updateLap(r: Racer): void {
     const cp = Math.min(CP_COUNT - 1, Math.floor(r.t * CP_COUNT))
     r.cps[cp] = true
+
+    // 分段计时：顺序通过下一个检查点才算，和最佳圈同分段对比
+    if (!this.frozen && cp === (r.lastCp + 1) % CP_COUNT) {
+      const done = r.lastCp
+      const split = this.time - r.lapStart
+      r.sectors[done] = split
+      if (r.bestSectors.length === CP_COUNT && r.bestSectors[done] > 0 && r.isPlayer) {
+        this.sectorFlash = { sector: done, delta: split - r.bestSectors[done] }
+      }
+      r.lastCp = cp
+    }
+
     const d = r.t - r.prevT
     if (d < -0.5) {
       // 正向越过起跑线
@@ -219,9 +295,16 @@ export class RaceDirector {
         r.cps.fill(false)
         if (r.lap >= 1) {
           r.lapTimes.push(lapTime)
-          if (lapTime < r.bestLap) r.bestLap = lapTime
+          if (lapTime < r.bestLap) {
+            r.bestLap = lapTime
+            // 刷新最佳圈：把这一圈的分段存为对比基准
+            r.sectors[CP_COUNT - 1] = lapTime
+            r.bestSectors = [...r.sectors]
+          }
           if (r.isPlayer) this.lapFlash = { lap: r.lap, time: lapTime }
         }
+        r.sectors = new Array(CP_COUNT).fill(0)
+        r.lastCp = 0
         if (r.lap >= this.totalLaps && !r.finished) {
           r.finished = true
           r.finishTime = this.time

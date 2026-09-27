@@ -8,6 +8,8 @@ export interface DriftEvent {
   strength: number
   /** 连喷层数 */
   combo: number
+  /** 是否由最佳化漂移（轻点）结算出来的 */
+  optimized: boolean
 }
 
 export interface DriftContext {
@@ -97,6 +99,17 @@ export class DriftCharge {
     this.launchTimer = 0.45 + this.driver.startBoost
   }
 
+  /** 外部打断漂移（撞墙等）：气全丢，并记一次失败 */
+  abort(): void {
+    if (this.state !== 'drifting') return
+    this.state = 'none'
+    this.charge = 0
+    this.driftTime = 0
+    this.comboCount = 0
+    this.comboWindow = 0
+    this.events.push({ type: 'fail', strength: 0, combo: 0, optimized: false })
+  }
+
   update(dt: number, input: KartInput, ctx: DriftContext): void {
     // 事件队列只保留最近若干条，未被消费也不会堆积
     if (this.events.length > 8) this.events.splice(0, this.events.length - 8)
@@ -125,11 +138,15 @@ export class DriftCharge {
       const slipQ = clamp(slipAbs / 0.8, 0, 1)
       const speedQ = 0.45 + 0.55 * clamp(ctx.speed / ctx.maxSpeed, 0, 1)
       const comboMul = 1 + Math.min(this.comboCount, 6) * 0.08
-      this.charge = Math.min(1, this.charge + (0.2 + 0.95 * slipQ) * speedQ * comboMul * dt)
+      this.charge = Math.min(
+        1,
+        this.charge + (0.2 + 0.95 * slipQ) * speedQ * comboMul * this.stats.chargeRate * dt,
+      )
 
-      // 断位拉车头：反方向键（+漂移键）把车头校正回来即出小喷
+      // 断位拉车头：反方向键（+漂移键）把车头校正回来即出小喷。
+      // 气太少时忽略反打，避免入漂瞬间的微小反向输入白白打断漂移。
       const counter = input.steer * this.driftDir < -0.25
-      if (counter && slipAbs < RELEASE_SLIP) {
+      if (counter && slipAbs < RELEASE_SLIP && this.charge > 0.12) {
         this.release(true)
       } else if (!held) {
         // 松键：车头已经回正才有喷，否则只剩速度损耗
@@ -146,7 +163,7 @@ export class DriftCharge {
     if (input.nitro && !this.prevNitro && this.gauge >= 1 && this.nitroTimer <= 0) {
       this.gauge -= 1
       this.nitroTimer = (1.9 + this.driver.nitroTimeBonus) * this.stats.nitroPower
-      this.events.push({ type: 'nitro', strength: 1, combo: this.comboCount })
+      this.events.push({ type: 'nitro', strength: 1, combo: this.comboCount, optimized: false })
     }
 
     this.prevDrift = held
@@ -169,11 +186,16 @@ export class DriftCharge {
       this.comboCount += 1
       // 连喷窗口：小喷结束后 0.25s 内重新入漂即保留层数
       this.comboWindow = this.boostTimer + 0.25
-      this.events.push({ type: 'boost', strength: this.boostStrength, combo: this.comboCount })
+      this.events.push({
+        type: 'boost',
+        strength: this.boostStrength,
+        combo: this.comboCount,
+        optimized: short,
+      })
     } else {
       this.comboCount = 0
       this.comboWindow = 0
-      this.events.push({ type: 'fail', strength: 0, combo: 0 })
+      this.events.push({ type: 'fail', strength: 0, combo: 0, optimized: false })
     }
   }
 }

@@ -20,6 +20,8 @@ export interface HudModel {
   boosting: boolean
   boostKind: 'none' | 'small' | 'nitro'
   wrongWay: boolean
+  /** 与第 1 名的距离（米），第 1 名为 0 */
+  gapToLeader: number
   karts: Array<{ x: number; z: number; color: number; isPlayer: boolean }>
 }
 
@@ -29,6 +31,8 @@ export class Hud {
   readonly root: HTMLDivElement
   private lapText: HTMLElement
   private rankText: HTMLElement
+  private gapText: HTMLElement
+  private deltaText: HTMLElement
   private timeText: HTMLElement
   private lapTimeText: HTMLElement
   private speedText: HTMLElement
@@ -45,6 +49,7 @@ export class Hud {
   private mapScale = 1
   private mapOffset: [number, number] = [0, 0]
   private flashTimer = 0
+  private deltaTimer = 0
   private lastCountdown: string | null = null
 
   constructor(parent: HTMLElement, track: TrackSpline) {
@@ -53,7 +58,8 @@ export class Hud {
     const lapBox = el('div', 'hud-box hud-lap')
     this.rankText = el('div', 'hud-rank-big', '1 / 6')
     this.lapText = el('div', '', 'LAP 1/3')
-    lapBox.append(this.rankText, this.lapText)
+    this.gapText = el('div', 'hud-gap', '')
+    lapBox.append(this.rankText, this.lapText, this.gapText)
 
     const timeBox = el('div', 'hud-box hud-time')
     this.timeText = el('div', '', formatTime(0))
@@ -78,6 +84,7 @@ export class Hud {
 
     this.boostFx = el('div', 'boost-fx')
     this.center = el('div', 'hud-center')
+    this.deltaText = el('div', 'hud-delta')
     this.countdown = el('div', 'countdown hidden')
 
     this.canvas = el('canvas', 'hud-minimap')
@@ -87,7 +94,16 @@ export class Hud {
     this.canvas.style.height = `${MAP_SIZE}px`
     this.ctx = this.canvas.getContext('2d')!
 
-    this.root.append(lapBox, timeBox, gauge, this.canvas, this.boostFx, this.center, this.countdown)
+    this.root.append(
+      lapBox,
+      timeBox,
+      gauge,
+      this.canvas,
+      this.boostFx,
+      this.center,
+      this.deltaText,
+      this.countdown,
+    )
     parent.appendChild(this.root)
     this.prepareMap(track)
   }
@@ -126,6 +142,7 @@ export class Hud {
   hide(): void {
     this.root.classList.add('hidden')
     this.boostFx.classList.remove('small', 'nitro')
+    this.deltaText.classList.remove('show')
     this.setCountdown(null)
   }
 
@@ -148,14 +165,29 @@ export class Hud {
     this.flashTimer = seconds
   }
 
+  /** 分段对比：负数更快（绿），正数更慢（红） */
+  showSectorDelta(sector: number, delta: number): void {
+    const sign = delta <= 0 ? '-' : '+'
+    this.deltaText.textContent = `S${sector + 1} ${sign}${Math.abs(delta).toFixed(2)}s`
+    this.deltaText.classList.remove('faster', 'slower')
+    this.deltaText.classList.add('show', delta <= 0 ? 'faster' : 'slower')
+    this.deltaTimer = 2
+  }
+
   update(m: HudModel, dt: number): void {
     if (this.flashTimer > 0) {
       this.flashTimer -= dt
       if (this.flashTimer <= 0) this.center.classList.remove('show')
     }
+    if (this.deltaTimer > 0) {
+      this.deltaTimer -= dt
+      if (this.deltaTimer <= 0) this.deltaText.classList.remove('show')
+    }
 
     this.rankText.textContent = `${m.rank} / ${m.total}`
     this.lapText.textContent = `LAP ${clamp(m.lap, 1, m.totalLaps)}/${m.totalLaps}`
+    this.gapText.textContent =
+      m.rank === 1 ? '领跑' : `距第1名 ${Math.round(Math.max(0, m.gapToLeader))}m`
     this.timeText.textContent = formatTime(m.time)
     this.lapTimeText.textContent = `单圈 ${m.lastLap > 0 ? formatTime(m.lastLap) : '--'} · 最佳 ${
       isFinite(m.bestLap) ? formatTime(m.bestLap) : '--'

@@ -32,6 +32,8 @@ export interface KartStats {
   driftGrip: number
   /** 侧滑速度损耗系数 */
   slipDrag: number
+  /** 集气效率倍率（漂移攒气快慢） */
+  chargeRate: number
   /** 氮气威力 */
   nitroPower: number
   /** 防御（本期仅占位，道具赛使用） */
@@ -58,6 +60,7 @@ export const DEFAULT_KART_STATS: KartStats = {
   grip: 11,
   driftGrip: 2.0,
   slipDrag: 0.62,
+  chargeRate: 1,
   nitroPower: 1,
   defense: 0,
 }

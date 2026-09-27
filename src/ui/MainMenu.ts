@@ -12,8 +12,11 @@ const SIZES = [2, 4, 6]
 export class MainMenu {
   readonly root: HTMLDivElement
   private onPick: (c: MenuChoice) => void = () => {}
+  private onGarage: () => void = () => {}
+  private onBoard: () => void = () => {}
   private stats: StatsProvider | null = null
   private sizeButtons: Array<{ size: number; btn: HTMLButtonElement }> = []
+  private kartLine: HTMLElement
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'panel hidden')
@@ -22,11 +25,14 @@ export class MainMenu {
       el('p', 'subtitle', '漂移集气 · 拉车头出小喷 · 连喷维持高速。3 圈竞速，6 车同场。'),
     )
 
-    const single = el('div', 'row')
-    single.appendChild(
-      button('单人游戏', 'btn', () => this.onPick({ mode: 'single', roomSize: 6 })),
-    )
-    this.root.appendChild(single)
+    this.kartLine = el('div', 'status', '当前车型：--')
+    this.root.appendChild(this.kartLine)
+
+    const top = el('div', 'row')
+    top.appendChild(button('单人游戏', 'btn', () => this.onPick({ mode: 'single', roomSize: 6 })))
+    top.appendChild(button('车库 · 选车型', 'btn secondary', () => this.onGarage()))
+    top.appendChild(button('排行榜', 'btn secondary', () => this.onBoard()))
+    this.root.appendChild(top)
 
     this.root.appendChild(el('div', 'status', '多人快速匹配（自动进有空位的房间）'))
     const multi = el('div', 'row')
@@ -52,11 +58,21 @@ export class MainMenu {
     parent.appendChild(this.root)
   }
 
-  show(onPick: (c: MenuChoice) => void, stats?: StatsProvider): void {
-    this.onPick = onPick
+  show(
+    handlers: { onPick: (c: MenuChoice) => void; onGarage: () => void; onBoard: () => void },
+    stats?: StatsProvider,
+  ): void {
+    this.onPick = handlers.onPick
+    this.onGarage = handlers.onGarage
+    this.onBoard = handlers.onBoard
     if (stats) this.stats = stats
     this.refresh()
     this.root.classList.remove('hidden')
+  }
+
+  /** 显示当前选中的车型 */
+  setKart(name: string, tagline: string): void {
+    this.kartLine.textContent = `当前车型：${name} — ${tagline}`
   }
 
   /** 刷新各人数档位的可加入房间数（大厅一直在变） */
