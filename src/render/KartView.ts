@@ -61,8 +61,9 @@ export class KartView {
   private wheels: THREE.Group[] = []
   private steerPivots: THREE.Group[] = []
   private flames: THREE.Mesh[] = []
+  private nozzles: Array<{ pivot: THREE.Group; ring: THREE.Mesh; flame: THREE.Mesh }> = []
   private flameMat: THREE.MeshBasicMaterial
-  private flameScale = 1
+  private nozzleScale = 1
   private neonMat: THREE.MeshBasicMaterial
   private neonBase: THREE.Color
   private glowMat: THREE.MeshBasicMaterial
@@ -152,19 +153,33 @@ export class KartView {
       this.body.add(strip, skirt, strut)
     }
 
-    // 推进器：1 个居中大喷，或 2 个对称喷口
+    // 推进器：1 个居中大喷，或 2 个对称喷口。每个喷口自带 pivot，可做矢量偏转
     const thrusterZ = style.thrusters === 1 ? [0] : [-0.52 * bz, 0.52 * bz]
     const thrusterScale = style.thrusters === 1 ? 1.35 : 1
+    this.nozzleScale = thrusterScale
+    this.flameMat = new THREE.MeshBasicMaterial({
+      color: 0x8fd8ff,
+      transparent: true,
+      opacity: 0.85,
+    })
     for (const z of thrusterZ) {
+      const pivot = new THREE.Group()
+      pivot.position.set(-1.85 * bx, 0.6 * by, z)
       const thruster = new THREE.Mesh(GEO.thruster, metal)
       thruster.rotation.z = Math.PI / 2
       thruster.scale.setScalar(thrusterScale)
-      thruster.position.set(-1.85 * bx, 0.6 * by, z)
       const ring = new THREE.Mesh(GEO.thrusterRing, this.neonMat)
       ring.rotation.y = Math.PI / 2
       ring.scale.setScalar(thrusterScale)
-      ring.position.set(-2.28 * bx, 0.6 * by, z)
-      this.body.add(thruster, ring)
+      ring.position.x = -0.43 * bx
+      const flame = new THREE.Mesh(GEO.flame, this.flameMat)
+      flame.rotation.z = Math.PI / 2
+      flame.position.x = -1.15 * bx
+      flame.visible = false
+      pivot.add(thruster, ring, flame)
+      this.body.add(pivot)
+      this.nozzles.push({ pivot, ring, flame })
+      this.flames.push(flame)
     }
 
     // 卡通描边：只给车体主块，避免 draw call 翻倍
@@ -198,22 +213,6 @@ export class KartView {
 
     this.group.add(this.body)
     scene.add(this.group)
-
-    // 推进器尾焰（数量与喷口一致）
-    this.flameMat = new THREE.MeshBasicMaterial({
-      color: 0x66ccff,
-      transparent: true,
-      opacity: 0.85,
-    })
-    this.flameScale = thrusterScale
-    for (const z of thrusterZ) {
-      const flame = new THREE.Mesh(GEO.flame, this.flameMat)
-      flame.rotation.z = Math.PI / 2
-      flame.position.set(-3.0 * bx, 0.6 * by, z)
-      flame.visible = false
-      this.body.add(flame)
-      this.flames.push(flame)
-    }
 
     // 车底霓虹地灯（随集气变亮）
     this.glowMat = new THREE.MeshBasicMaterial({
@@ -333,21 +332,45 @@ export class KartView {
     this.glowMat.opacity = 0.2 + 0.55 * this.heat
 
     const boostQ = d.nitroTimer > 0 ? 1 : d.boostTimer > 0 ? 0.35 + 0.5 * d.boostStrength : 0
-    if (boostQ > 0) {
-      const flicker = 0.85 + this.rng() * 0.3
-      this.flameMat.color.setHex(d.nitroTimer > 0 ? 0xff6ad5 : 0x66ccff)
-      for (const flame of this.flames) {
-        flame.visible = true
-        const w = boostQ * flicker * 0.85 * this.flameScale
-        flame.scale.set(w, (0.8 + boostQ * 0.8) * this.flameScale, w)
-      }
-    } else {
-      for (const flame of this.flames) flame.visible = false
-    }
+    this.updateNozzles(kart, steerAngle, boostQ)
 
     this.emit(kart, dt)
     this.advance(this.sparkPool, this.sparks, dt, 15, 0.05)
     this.advance(this.smokePool, this.smoke, dt, -1.2, 0.2)
+  }
+
+  /**
+   * 矢量喷口：开度与尾焰随推力变化 —— 松油门喷口收拢无焰，满油门中等蓝焰，
+   * 小喷/氮气才是长焰；喷口还会随转向做小角度偏转（推力矢量）。
+   */
+  private updateNozzles(kart: KartPhysics, steerAngle: number, boostQ: number): void {
+    const d = kart.drift
+    const t = kart.thrust
+    const base = Math.min(1, t) // 0..1 油门段
+    const extra = Math.max(0, t - 1) // >1 的喷射段
+    const flicker = 0.9 + this.rng() * 0.2
+    // 喷口开度：怠速 0.7，满油门 1.0，喷射时进一步张开
+    const open = (0.7 + 0.3 * base + 0.3 * extra) * this.nozzleScale
+    const visible = t > 0.12
+    const length = (0.35 + 0.5 * base + 1.1 * extra) * flicker * this.nozzleScale
+    const width = (0.45 + 0.3 * base + 0.35 * extra) * this.nozzleScale
+
+    this.flameMat.color.setHex(
+      d.nitroTimer > 0 ? 0xff6ad5 : boostQ > 0 ? 0x66ccff : 0x8fd8ff,
+    )
+    this.flameMat.opacity = 0.55 + 0.35 * Math.min(1, base + extra)
+
+    for (const n of this.nozzles) {
+      n.ring.scale.setScalar(open)
+      // 推力矢量：喷口朝转向反方向偏一点，视觉上"推着车头转"
+      n.pivot.rotation.y = steerAngle * 0.4
+      n.flame.visible = visible
+      if (visible) {
+        n.flame.scale.set(width, length, width)
+        // 焰锥半长 = 1.9/2 * length，锚点后移让焰根始终贴在喷口出口
+        n.flame.position.x = -0.45 - 0.95 * length
+      }
+    }
   }
 
   private emit(kart: KartPhysics, dt: number): void {

@@ -5,7 +5,7 @@ import {
   type KartInput,
   type KartStats,
 } from '../types'
-import { clamp, wrapPi } from '../core/math'
+import { clamp, damp, wrapPi } from '../core/math'
 import { DriftCharge } from './DriftCharge'
 
 /** 侧滑角上限，超过就等于打转了 */
@@ -32,6 +32,11 @@ export class KartPhysics {
   offRoad = false
   /** 冻结（倒计时阶段） */
   frozen = false
+  /**
+   * 当前推力（0 = 完全松油门，1 = 满油门，>1 = 小喷/氮气的额外推力）。
+   * 升压比泄压慢，形成"动力建立"的手感；渲染层用它决定矢量喷口开度与尾焰长度。
+   */
+  thrust = 0
   readonly drift: DriftCharge
 
   constructor(
@@ -62,6 +67,7 @@ export class KartPhysics {
     this.speed = 0
     this.slip = 0
     this.offRoad = false
+    this.thrust = 0
     this.drift.reset()
   }
 
@@ -86,11 +92,17 @@ export class KartPhysics {
     const offRoadMul = this.offRoad ? 0.6 : 1
     const targetMax = st.maxSpeed * boostMul * offRoadMul
 
+    // 推力：松油门为 0，满油门为 1，小喷/氮气超过 1；升压慢、泄压快
+    const wantThrust =
+      d.nitroTimer > 0 ? 1.6 : d.boostTimer > 0 || d.launchTimer > 0 ? 1.25 : input.throttle > 0 ? 1 : 0
+    this.thrust = damp(this.thrust, wantThrust, wantThrust > this.thrust ? 6.5 : 9, dt)
+
     if (d.boosting) {
       this.speed += (targetMax - this.speed) * Math.min(1, 7 * dt)
     } else if (input.throttle > 0) {
       const room = clamp(1 - this.speed / targetMax, 0, 1)
-      this.speed += st.accel * (0.35 + 0.65 * room) * input.throttle * dt
+      // 乘上 thrust：刚给油时动力还没建立，松油门后也不会立刻满推力
+      this.speed += st.accel * (0.35 + 0.65 * room) * input.throttle * Math.min(1, this.thrust) * dt
     } else if (input.throttle < 0) {
       this.speed += st.brake * input.throttle * dt
     } else {
