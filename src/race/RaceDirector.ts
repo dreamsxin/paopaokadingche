@@ -254,8 +254,10 @@ export class RaceDirector {
     k.z = s.pos.z + s.right.z * sign * wall
     const along = Math.cos(k.velAngle) * s.tangent.x + Math.sin(k.velAngle) * s.tangent.z
     k.speed = Math.max(0, k.speed * (0.5 + 0.35 * Math.abs(along)))
-    k.velAngle = along < 0 ? s.angle + Math.PI : s.angle
-    k.heading += wrapPi(s.angle - k.heading) * 0.4
+    // 沿墙擦行：车头拉向赛道方向，并让速度方向与车头一致（不允许撞墙后原地打转）
+    k.heading += wrapPi(s.angle - k.heading) * 0.6
+    k.velAngle = k.heading
+    k.slip = 0
     // 撞墙打断漂移集气
     k.drift.abort()
   }
